@@ -3,7 +3,6 @@ from googletrans import Translator
 import io
 import zipfile
 import time
-import re
 
 # Cấu hình danh sách ngôn ngữ dịch thuật đầy đủ
 LANGUAGES = {
@@ -41,9 +40,7 @@ def parse_srt_input(text):
         if not line_str:
             continue
             
-        # Nếu dòng chứa ký tự mốc thời gian chuẩn dạng -->
         if "-->" in line_str:
-            # Nếu trước đó đang lưu dở một đoạn sub, lưu nó lại trước khi sang đoạn mới
             if current_sub:
                 parsed_subs.append(current_sub)
                 index += 1
@@ -55,21 +52,16 @@ def parse_srt_input(text):
                 'end': end_time.strip(),
                 'text_lines': []
             }
-        # Nếu dòng là số thứ tự đơn lẻ và đang không ở trong khối sub nào thì bỏ qua
         elif line_str.isdigit() and not current_sub:
             continue
-        # Nếu là dòng chữ nội dung câu thoại
         elif current_sub:
-            # Ngăn trường hợp số thứ tự đoạn tiếp theo bị gộp vào nội dung câu thoại trước
             if line_str.isdigit() and lines[lines.index(line)+1 if lines.index(line)+1 < len(lines) else lines.index(line)].strip().find("-->") != -1:
                 continue
             current_sub['text_lines'].append(line_str)
             
-    # Đóng nốt đoạn sub cuối cùng nếu có
     if current_sub:
         parsed_subs.append(current_sub)
         
-    # Chuẩn hóa cấu trúc đầu ra để khớp với hàm dịch
     final_subs = []
     for sub in parsed_subs:
         final_subs.append({
@@ -96,86 +88,107 @@ def generate_srt_string(subs_data, is_original=True, target_lang='en'):
                 continue
                 
             translated_text = sub['text']
-            for _ in range(3):  # Thử lại tối đa 3 lần nếu lỗi mạng
+            for _ in range(3):
                 try:
                     translated_text = st.session_state.translator.translate(sub['text'], dest=target_lang).text
-                    time.sleep(0.2)  # Tránh bị Google quét spam hoặc chặn IP
+                    time.sleep(0.15)
                     break
                 except Exception:
                     time.sleep(1)
             srt_content += f"{translated_text}\n\n"
     return srt_content
 
+def translate_description(desc_text, target_lang='en'):
+    """Dịch đoạn mô tả giới thiệu video"""
+    if not desc_text.strip():
+        return ""
+    for _ in range(3):
+        try:
+            translated_desc = st.session_state.translator.translate(desc_text, dest=target_lang).text
+            return translated_desc
+        except Exception:
+            time.sleep(1)
+    return desc_text
+
 # --- GIAO DIỆN ỨNG DỤNG WEB ---
-st.set_page_config(page_title="YouTube Multi-Lang Subtitle Generator", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="YouTube Multi-Lang Subtitle & Desc Generator", page_icon="🎬", layout="centered")
 
-st.title("🎬 Trình Tạo & Dịch Phụ Đề YouTube")
-st.write("Nhập phụ đề gốc theo chuẩn định dạng `.srt`, hệ thống sẽ tự động dịch hàng loạt sang nhiều ngôn ngữ quốc tế.")
+st.title("🎬 Trình Tạo & Dịch Phụ Đề + Mô Tả YouTube")
+st.write("Hệ thống hỗ trợ dịch hàng loạt cả **Phụ đề chuẩn SRT** và **Mô tả video** sang nhiều ngôn ngữ quốc tế.")
 
-# Hướng dẫn mẫu
-with st.expander("💡 Xem định dạng mẫu để nhập dữ liệu"):
-    st.code(
-        "1\n"
-        "00:00:39,800 --> 00:00:45,700\n"
-        "Xin chào mọi người, hiện tại mình đang ở Bình Dương, nơi này cách Sài Gòn khoảng 50km\n\n"
-        "2\n"
-        "00:00:46,000 --> 00:00:52,100\n"
-        "Hôm nay mình sẽ dẫn mọi người đi tham quan một địa điểm rất đẹp.",
-        language="text"
-    )
+# Layout chia tab hoặc chia khu vực nhập liệu
+st.subheader("1. Nhập dữ liệu gốc (Tiếng Việt)")
 
-# Khung nhập dữ liệu
-input_data = st.text_area("✍️ Nhập nội dung phụ đề gốc của bạn tại đây:", height=300, placeholder="00:00:00,000 --> 00:00:05,000\nNội dung câu thoại...")
+input_sub = st.text_area("✍️ [Khung 1] Nhập nội dung phụ đề gốc (.srt):", height=200, placeholder="00:00:39,800 --> 00:00:45,700\nNội dung câu thoại...")
+
+input_desc = st.text_area("📝 [Khung 2] Nhập phần mô tả trên youtube:", height=150, placeholder="Ví dụ: Video này giới thiệu cảnh đẹp Bình Dương và Sài Gòn. Mời các bạn đón xem! Hãy nhớ Đăng ký kênh nhé...")
 
 # Lựa chọn ngôn ngữ muốn dịch
-st.subheader("🌐 Chọn ngôn ngữ muốn dịch sang:")
+st.subheader("🌐 2. Chọn ngôn ngữ muốn dịch sang:")
 selected_langs = st.multiselect(
-    "Mặc định luôn có file gốc. Chọn thêm các ngôn ngữ bạn muốn dịch:",
+    "Mặc định luôn giữ lại file gốc. Chọn thêm các ngôn ngữ bạn muốn dịch:",
     options=list(LANGUAGES.keys()),
     format_func=lambda x: LANGUAGES[x],
     default=['en', 'ru', 'de', 'fr']
 )
 
 # Nút xử lý dữ liệu
-if st.button("🚀 Bắt đầu dịch phụ đề hàng loạt", type="primary"):
-    if not input_data.strip():
-        st.error("Vui lòng nhập nội dung phụ đề trước khi bấm nút!")
+if st.button("🚀 Bắt đầu dịch tự động hàng loạt", type="primary"):
+    if not input_sub.strip() and not input_desc.strip():
+        st.error("Vui lòng nhập ít nhất nội dung Phụ đề hoặc Mô tả video!")
     else:
-        parsed_subs = parse_srt_input(input_data)
+        parsed_subs = parse_srt_input(input_sub) if input_sub.strip() else []
         
-        if not parsed_subs:
-            st.error("Dữ liệu nhập vào sai định dạng. Vui lòng kiểm tra lại cấu trúc mốc thời gian phải chứa ký tự '-->'.")
+        if input_sub.strip() and not parsed_subs:
+            st.error("Khung phụ đề nhập vào sai định dạng. Vui lòng kiểm tra lại ký tự mốc thời gian '-->'.")
         else:
             zip_buffer = io.BytesIO()
+            description_results = f"=== MÔ TẢ GỐC (TIẾNG VIỆT) ===\n{input_desc}\n\n=================================\n\n"
             
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                # 1. Tạo file Tiếng Việt gốc
-                vi_srt = generate_srt_string(parsed_subs, is_original=True)
-                zip_file.writestr("sub_Goc.srt", vi_srt)
+                # 1. Xử lý file gốc Tiếng Việt (nếu có nhập phụ đề)
+                if parsed_subs:
+                    vi_srt = generate_srt_string(parsed_subs, is_original=True)
+                    zip_file.writestr("sub_Goc.srt", vi_srt)
                 
-                # 2. Tạo các file dịch thuật
+                # 2. Xử lý các ngôn ngữ dịch thuật
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
                 for i, lang_code in enumerate(selected_langs):
                     lang_display_name = LANGUAGES[lang_code].split(' ')[0]
-                    status_text.text(f"⏳ Đang dịch sang {lang_display_name}...")
-                    
-                    lang_srt = generate_srt_string(parsed_subs, is_original=False, target_lang=lang_code)
+                    status_text.text(f"⏳ Đang xử lý tiếng {lang_display_name}...")
                     
                     clean_lang_name = LANGUAGES[lang_code].split(' ')[1].replace('(', '').replace(')', '')
-                    file_name = f"sub_{clean_lang_name}.srt"
-                    zip_file.writestr(file_name, lang_srt)
+                    
+                    # Dịch phụ đề
+                    if parsed_subs:
+                        lang_srt = generate_srt_string(parsed_subs, is_original=False, target_lang=lang_code)
+                        zip_file.writestr(f"sub_{clean_lang_name}.srt", lang_srt)
+                    
+                    # Dịch mô tả
+                    if input_desc.strip():
+                        translated_desc = translate_description(input_desc, target_lang=lang_code)
+                        description_results += f"=== MÔ TẢ TIẾNG {clean_lang_name.upper()} ===\n{translated_desc}\n\n=================================\n\n"
                     
                     progress_bar.progress((i + 1) / len(selected_langs))
                 
-                status_text.text("✅ Đã xử lý xong tất cả ngôn ngữ!")
+                # Lưu file mô tả tổng hợp vào ZIP nếu người dùng có nhập mô tả
+                if input_desc.strip():
+                    zip_file.writestr("Mo_Ta_Da_Dich.txt", description_results)
+                    
+                status_text.text("✅ Đã xử lý xong tất cả nội dung!")
             
-            st.success(f"🎉 Đã dịch thành công toàn bộ {len(parsed_subs)} đoạn phụ đề!")
+            st.success("🎉 Đã dịch và đóng gói thành công!")
+            
+            # Khung hiển thị trực quan phần mô tả đã dịch để copy nhanh không cần giải nén
+            if input_desc.strip():
+                with st.expander("📋 Xem nhanh và Copy phần Mô tả đã dịch tại đây"):
+                    st.text_area("Nội dung mô tả đa ngôn ngữ:", value=description_results, height=250)
             
             st.download_button(
                 label="📥 Tải Về Toàn Bộ File (.ZIP)",
                 data=zip_buffer.getvalue(),
-                file_name="phu_de_youtube_da_dich.zip",
+                file_name="phu_de_va_mo_ta_youtube.zip",
                 mime="application/zip"
             )
